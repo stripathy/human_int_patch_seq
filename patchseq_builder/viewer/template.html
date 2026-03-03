@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linked UMAP Viewer — Expression + Electrophysiology</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #fafafa;
+  }
+  .header {
+    padding: 10px 20px;
+    background: white;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .header h1 { font-size: 16px; color: #333; white-space: nowrap; }
+  .header .stats { color: #666; font-size: 12px; }
+  .controls {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .controls label { font-size: 12px; font-weight: 600; color: #555; }
+  .controls select {
+    padding: 3px 6px; border: 1px solid #ccc;
+    border-radius: 4px; font-size: 12px;
+  }
+  .controls button {
+    padding: 3px 10px; border: 1px solid #ccc;
+    border-radius: 4px; font-size: 11px; cursor: pointer; background: white;
+  }
+  .controls button:hover { background: #f0f0f0; }
+  .plots-container {
+    display: flex;
+    width: 100%;
+    height: 48vh;
+  }
+  .plot-panel {
+    flex: 1;
+    position: relative;
+    border-right: 1px solid #e0e0e0;
+  }
+  .plot-panel:last-child { border-right: none; }
+  .plot-panel .panel-title {
+    position: absolute; top: 6px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px; font-weight: 600; color: #444;
+    background: rgba(255,255,255,0.85); padding: 2px 10px;
+    border-radius: 4px; z-index: 10;
+    pointer-events: none;
+  }
+  .plot-panel .plot { width: 100%; height: 100%; }
+  /* Highlight ring */
+  .highlight-info {
+    position: absolute; bottom: 8px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px; color: #666; background: rgba(255,255,255,0.9);
+    padding: 2px 8px; border-radius: 3px; z-index: 10;
+    pointer-events: none; white-space: nowrap;
+  }
+  /* Trace panel */
+  .trace-panel {
+    border-top: 2px solid #e0e0e0;
+    background: white;
+    padding: 4px 20px 2px;
+    height: 42vh;
+    min-height: 200px;
+    max-height: 50vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .trace-panel .trace-header {
+    font-size: 12px; font-weight: 600; color: #333;
+    margin-bottom: 2px;
+    display: flex; align-items: center; gap: 10px;
+    flex-shrink: 0;
+  }
+  .trace-panel .trace-header .trace-info {
+    font-weight: 400; color: #555; font-size: 11px;
+  }
+  .trace-images {
+    flex: 1;
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+    justify-content: center;
+    overflow: hidden;
+    min-height: 0;
+  }
+  .trace-images .trace-panel-wrapper {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .trace-images .trace-svg-container {
+    height: 100%;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    background: white;
+    position: relative;
+  }
+  .trace-images .trace-svg-container svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+  }
+  .panel-empty-msg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #bbb;
+    font-size: 12px;
+    font-style: italic;
+    pointer-events: none;
+  }
+  .svg-axis-label {
+    font-size: 8px;
+    color: #888;
+    pointer-events: none;
+    position: absolute;
+    z-index: 5;
+    background: rgba(255,255,255,0.7);
+    padding: 0 2px;
+  }
+  .svg-axis-label.x-label {
+    bottom: 3px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .svg-axis-label.y-label {
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%) rotate(-90deg);
+    transform-origin: center center;
+  }
+  .trace-placeholder {
+    color: #999;
+    font-size: 13px;
+    text-align: center;
+    padding: 20px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Linked UMAP Viewer</h1>
+  <span class="stats">
+    Expression: {{ n_ref }} snRNA-seq + {{ n_ps }} patch-seq &nbsp;|&nbsp;
+    Ephys: {{ n_ephys }} patch-seq cells
+  </span>
+  <div class="controls">
+    <label for="colorBy">Color by:</label>
+    <select id="colorBy" onchange="updateColoring()">
+      <option value="subclass">Subclass</option>
+      <option value="supertype">Supertype</option>
+      <option value="modality">Modality</option>
+    </select>
+    <button onclick="resetViews()">Reset views</button>
+  </div>
+</div>
+
+<div class="plots-container">
+  <div class="plot-panel">
+    <div class="panel-title">Gene Expression UMAP (Harmony)</div>
+    <div id="exprPlot" class="plot"></div>
+    <div id="exprHighlight" class="highlight-info" style="display:none;"></div>
+  </div>
+  <div class="plot-panel">
+    <div class="panel-title">Electrophysiology UMAP</div>
+    <div id="ephysPlot" class="plot"></div>
+    <div id="ephysHighlight" class="highlight-info" style="display:none;"></div>
+  </div>
+</div>
+
+<div class="trace-panel">
+  <div class="trace-header">
+    <span>Morphology &amp; Electrophysiology</span>
+    <span id="traceInfo" class="trace-info" style="display:none;"></span>
+  </div>
+  <div class="trace-images">
+    <div class="trace-panel-wrapper" style="display:none;">
+      <div id="morphContainer" class="trace-svg-container"></div>
+      <div id="morphEmpty" class="panel-empty-msg">No morphology</div>
+    </div>
+    <div class="trace-panel-wrapper" style="display:none;">
+      <div id="traceContainer" class="trace-svg-container"></div>
+      <div id="traceEmpty" class="panel-empty-msg">No trace</div>
+    </div>
+    <div class="trace-panel-wrapper" style="display:none;">
+      <div id="fiContainer" class="trace-svg-container"></div>
+      <div id="fiEmpty" class="panel-empty-msg">No FI curve</div>
+    </div>
+    <div id="tracePlaceholder" class="trace-placeholder">
+      Hover over a patch-seq cell in either UMAP to view its electrophysiology recording and morphology
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Data injection points (Jinja2) ───────────────────────────────
+const refTrace = {{ ref_trace }};
+const refSubclassColors = {{ ref_subclass_colors }};
+const refSupertypeColors = {{ ref_supertype_colors }};
+const exprPsTraces = {{ expr_ps_traces }};
+const exprPsMeta = {{ expr_ps_meta }};
+const ephysTraces = {{ ephys_traces }};
+const ephysMeta = {{ ephys_meta }};
+const subclassColors = {{ subclass_colors }};
+const supertypeColors = {{ supertype_colors }};
+const nRefLabel = "{{ n_ref }}";
+</script>
+
+{% raw %}
+<script>
+// ── Cell ID index for cross-highlighting ─────────────────────────
+// Build lookup: cellId -> {plotId, traceIdx, pointIdx, x, y}
+const exprCellIndex = {};
+const ephysCellIndex = {};
+
+// Expression: ref trace is index 0, ps traces start at 1
+// customdata format: [cell_id, trace_svg, fi_svg, specimen_id, subclass, dataset]
+const exprAllTraces = [refTrace, ...exprPsTraces];
+for (let ti = 1; ti < exprAllTraces.length; ti++) {
+  const t = exprAllTraces[ti];
+  if (!t.customdata) continue;
+  for (let pi = 0; pi < t.customdata.length; pi++) {
+    const cd = t.customdata[pi];
+    exprCellIndex[cd[0]] = {traceIdx: ti, pointIdx: pi, x: t.x[pi], y: t.y[pi], cd: cd};
+  }
+}
+
+for (let ti = 0; ti < ephysTraces.length; ti++) {
+  const t = ephysTraces[ti];
+  if (!t.customdata) continue;
+  for (let pi = 0; pi < t.customdata.length; pi++) {
+    const cd = t.customdata[pi];
+    ephysCellIndex[cd[0]] = {traceIdx: ti, pointIdx: pi, x: t.x[pi], y: t.y[pi], cd: cd};
+  }
+}
+
+// ── Layout ────────────────────────────────────────────────────────
+const exprLayout = {
+  xaxis: { title: 'UMAP 1', zeroline: false, showgrid: false },
+  yaxis: { title: 'UMAP 2', zeroline: false, showgrid: false },
+  hovermode: 'closest',
+  margin: { l: 50, r: 10, t: 30, b: 50 },
+  paper_bgcolor: '#fafafa',
+  plot_bgcolor: 'white',
+  legend: {
+    font: { size: 10 },
+    itemclick: 'toggle',
+    itemdoubleclick: 'toggleothers',
+    x: 1.02, y: 1, xanchor: 'left',
+  },
+};
+
+const ephysLayout = {
+  xaxis: { title: 'UMAP 1', zeroline: false, showgrid: false },
+  yaxis: { title: 'UMAP 2', zeroline: false, showgrid: false },
+  hovermode: 'closest',
+  margin: { l: 50, r: 10, t: 30, b: 50 },
+  paper_bgcolor: '#fafafa',
+  plot_bgcolor: 'white',
+  showlegend: false,
+};
+
+const plotConfig = {
+  responsive: true, scrollZoom: true, displayModeBar: true,
+  modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+};
+
+// ── Render plots ──────────────────────────────────────────────────
+Plotly.newPlot('exprPlot', exprAllTraces, exprLayout, plotConfig);
+Plotly.newPlot('ephysPlot', ephysTraces, ephysLayout, plotConfig);
+
+// ── Cross-highlighting using SVG annotations (renders on top of WebGL) ──
+
+function makeHighlightAnnotation(x, y) {
+  return {
+    x: x, y: y, xref: 'x', yref: 'y',
+    text: '&nbsp;', showarrow: false,
+    bordercolor: '#00FF00', borderwidth: 4, borderpad: 12,
+    bgcolor: 'rgba(0,255,0,0.18)',
+    font: { size: 1, color: 'rgba(0,0,0,0)' },
+  };
+}
+
+function clearHighlights() {
+  Plotly.relayout('exprPlot', { annotations: [] });
+  Plotly.relayout('ephysPlot', { annotations: [] });
+  document.getElementById('exprHighlight').style.display = 'none';
+  document.getElementById('ephysHighlight').style.display = 'none';
+}
+
+function highlightCell(cellId, source) {
+  // Highlight in the OTHER plot
+  if (source !== 'expr' && exprCellIndex[cellId]) {
+    const info = exprCellIndex[cellId];
+    Plotly.relayout('exprPlot', {
+      annotations: [makeHighlightAnnotation(info.x, info.y)],
+    });
+    document.getElementById('exprHighlight').textContent = '\u2190 linked';
+    document.getElementById('exprHighlight').style.display = 'block';
+  } else {
+    Plotly.relayout('exprPlot', { annotations: [] });
+    document.getElementById('exprHighlight').style.display = 'none';
+  }
+
+  if (source !== 'ephys' && ephysCellIndex[cellId]) {
+    const info = ephysCellIndex[cellId];
+    Plotly.relayout('ephysPlot', {
+      annotations: [makeHighlightAnnotation(info.x, info.y)],
+    });
+    document.getElementById('ephysHighlight').textContent = '\u2190 linked';
+    document.getElementById('ephysHighlight').style.display = 'block';
+  } else {
+    Plotly.relayout('ephysPlot', { annotations: [] });
+    document.getElementById('ephysHighlight').style.display = 'none';
+  }
+}
+
+// Unhover — clear cross-highlight rings but keep trace panel showing last hovered cell
+document.getElementById('exprPlot').on('plotly_unhover', clearHighlights);
+document.getElementById('ephysPlot').on('plotly_unhover', clearHighlights);
+
+// ── Trace panel — hover-triggered with inline SVG + color matching ──
+
+// SVG cache: url -> svg text
+const svgCache = {};
+// Track current state
+let currentTraceCustomdata = null;
+let hoverDebounceTimer = null;
+const HOVER_DEBOUNCE_MS = 80;
+
+function getCurrentColor(customdata) {
+  // customdata: [cell_id, trace_svg, fi_svg, specimen_id, subclass, dataset, supertype]
+  const mode = document.getElementById('colorBy').value;
+  const subclass = customdata[4];
+  const supertype = customdata[6] || '';
+  if (mode === 'subclass') {
+    return subclassColors[subclass] || '#333333';
+  } else if (mode === 'supertype') {
+    return supertypeColors[supertype] || '#333333';
+  } else {
+    return '#E74C3C';  // modality mode: red for all patch-seq
+  }
+}
+
+async function fetchSvg(url) {
+  if (svgCache[url]) return svgCache[url];
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const text = await resp.text();
+    svgCache[url] = text;
+    return text;
+  } catch (e) {
+    return null;
+  }
+}
+
+function addAxisLabels(containerId, yLabel, xLabel) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  // Remove existing labels
+  container.querySelectorAll('.svg-axis-label').forEach(el => el.remove());
+  // Y-axis label (rotated, left side)
+  const yEl = document.createElement('div');
+  yEl.className = 'svg-axis-label y-label';
+  yEl.textContent = yLabel;
+  container.appendChild(yEl);
+  // X-axis label (bottom center)
+  const xEl = document.createElement('div');
+  xEl.className = 'svg-axis-label x-label';
+  xEl.textContent = xLabel;
+  container.appendChild(xEl);
+}
+
+function injectAndColorSvg(containerId, svgText, color) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = svgText;
+  const svg = container.querySelector('svg');
+  if (!svg) { container.style.display = 'none'; return; }
+
+  // Make SVG responsive
+  svg.removeAttribute('width');
+  svg.removeAttribute('height');
+  svg.style.width = '100%';
+  svg.style.height = '100%';
+
+  // DOM-based recoloring: target data elements, leave axes untouched
+  // Strategy: find all styled elements and recolor based on their stroke-width
+  svg.querySelectorAll('path, line, use').forEach(el => {
+    const style = el.getAttribute('style') || '';
+    // Skip axis tick marks (stroke-width: 0.8) and box borders (stroke-linejoin: miter)
+    if (style.includes('stroke-width: 0.8') || style.includes('stroke-linejoin: miter')) return;
+    // Skip background fill patches (no stroke, just fill: #ffffff)
+    if (style.includes('fill: #ffffff') && !style.includes('stroke:')) return;
+
+    // Data trace lines: stroke-width: 1.5 (voltage sweeps and FI curve line)
+    if (style.includes('stroke-width: 1.5')) {
+      el.style.stroke = color;
+      el.style.strokeOpacity = '0.7';
+    }
+    // Data point markers: <use> elements with stroke but NO stroke-width
+    // (tick <use> elements have stroke-width: 0.8, already skipped above)
+    else if (el.tagName === 'use' && style.includes('stroke:') && !style.includes('stroke-width')) {
+      el.style.stroke = color;
+      el.style.fill = color;
+    }
+    // Marker defs: <path> with id starting with 'm' (circle marker shapes for FI dots)
+    else if (el.tagName === 'path' && el.id && /^m[a-f0-9]{8,}$/.test(el.id)) {
+      if (style.includes('stroke: #000000') || style.includes('stroke:#000000')) {
+        el.style.stroke = color;
+        el.style.fill = color;
+      }
+    }
+  });
+
+  container.style.display = 'block';
+}
+
+function recolorCurrentTrace() {
+  // Recolor already-injected SVGs in the DOM (called on dropdown change)
+  if (!currentTraceCustomdata) return;
+  const color = getCurrentColor(currentTraceCustomdata);
+  // Recolor ephys traces only (not morphology — keep axon/dendrite colors)
+  ['traceContainer', 'fiContainer'].forEach(containerId => {
+    const container = document.getElementById(containerId);
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+    svg.querySelectorAll('path, line, use').forEach(el => {
+      const style = el.getAttribute('style') || '';
+      if (style.includes('stroke-width: 0.8') || style.includes('stroke-linejoin: miter')) return;
+      if (style.includes('fill: #ffffff') && !style.includes('stroke:')) return;
+      if (style.includes('stroke-width: 1.5')) {
+        el.style.stroke = color;
+        el.style.strokeOpacity = '0.7';
+      } else if (el.tagName === 'use' && style.includes('stroke:') && !style.includes('stroke-width')) {
+        el.style.stroke = color;
+        el.style.fill = color;
+      } else if (el.tagName === 'path' && el.id && /^m[a-f0-9]{8,}$/.test(el.id)) {
+        const origStyle = el.getAttribute('style') || '';
+        if (origStyle.includes('stroke:') && !origStyle.includes('stroke-width:')) {
+          el.style.stroke = color;
+          el.style.fill = color;
+        }
+      }
+    });
+  });
+  // Update info color dot
+  const traceInfo = document.getElementById('traceInfo');
+  if (traceInfo) {
+    const dot = traceInfo.querySelector('span[style]');
+    if (dot) dot.style.color = color;
+  }
+}
+
+async function showTrace(customdata) {
+  const traceSvgUrl = customdata[1];
+  const fiSvgUrl = customdata[2];
+  const specId = customdata[3];
+  const subclass = customdata[4];
+  const dataset = customdata[5];
+  const morphSvgUrl = customdata[7] || '';
+  const color = getCurrentColor(customdata);
+
+  const traceContainer = document.getElementById('traceContainer');
+  const fiContainer = document.getElementById('fiContainer');
+  const morphContainer = document.getElementById('morphContainer');
+  const traceInfo = document.getElementById('traceInfo');
+  const tracePlaceholder = document.getElementById('tracePlaceholder');
+
+  // Show all three panel wrappers (fixed layout)
+  morphContainer.parentElement.style.display = '';
+  traceContainer.parentElement.style.display = '';
+  fiContainer.parentElement.style.display = '';
+
+  // Remember current cell for recoloring on dropdown change
+  currentTraceCustomdata = customdata;
+
+  const morphEmpty = document.getElementById('morphEmpty');
+  const traceEmpty = document.getElementById('traceEmpty');
+  const fiEmpty = document.getElementById('fiEmpty');
+
+  // Morphology SVG (no recoloring — keep original axon/dendrite colors)
+  if (morphSvgUrl) {
+    const svgText = await fetchSvg(morphSvgUrl);
+    if (svgText) {
+      morphContainer.innerHTML = svgText;
+      const svg = morphContainer.querySelector('svg');
+      if (svg) {
+        svg.removeAttribute('width');
+        svg.removeAttribute('height');
+        svg.style.width = '100%';
+        svg.style.height = '100%';
+      }
+      morphContainer.style.display = 'block';
+      morphEmpty.style.display = 'none';
+    } else {
+      morphContainer.style.display = 'none';
+      morphEmpty.style.display = 'block';
+    }
+  } else {
+    morphContainer.innerHTML = '';
+    morphContainer.style.display = 'none';
+    morphEmpty.style.display = 'block';
+  }
+
+  if (traceSvgUrl) {
+    const svgText = await fetchSvg(traceSvgUrl);
+    if (svgText) {
+      injectAndColorSvg('traceContainer', svgText, color);
+      addAxisLabels('traceContainer', 'Voltage (mV)', 'Time (s)');
+      traceEmpty.style.display = 'none';
+    } else {
+      traceContainer.style.display = 'none';
+      traceEmpty.style.display = 'block';
+    }
+  } else {
+    traceContainer.innerHTML = '';
+    traceContainer.style.display = 'none';
+    traceEmpty.style.display = 'block';
+  }
+
+  if (fiSvgUrl) {
+    const svgText = await fetchSvg(fiSvgUrl);
+    if (svgText) {
+      injectAndColorSvg('fiContainer', svgText, color);
+      addAxisLabels('fiContainer', 'Spikes', 'Current (pA)');
+      fiEmpty.style.display = 'none';
+    } else {
+      fiContainer.style.display = 'none';
+      fiEmpty.style.display = 'block';
+    }
+  } else {
+    fiContainer.innerHTML = '';
+    fiContainer.style.display = 'none';
+    fiEmpty.style.display = 'block';
+  }
+
+  const hasAny = traceSvgUrl || fiSvgUrl || morphSvgUrl;
+  if (hasAny) {
+    tracePlaceholder.style.display = 'none';
+    const parts = ['<b>Specimen ' + specId + '</b>'];
+    parts.push('<span style="color:' + color + '; font-weight:700;">&#9679;</span> ' + subclass);
+    parts.push('Dataset: ' + dataset);
+    const modalities = [];
+    if (morphSvgUrl) modalities.push('morphology');
+    if (traceSvgUrl) modalities.push('ephys');
+    if (modalities.length) parts.push('[' + modalities.join(' + ') + ']');
+    traceInfo.innerHTML = parts.join(' &nbsp;|&nbsp; ');
+    traceInfo.style.display = 'block';
+  } else {
+    tracePlaceholder.textContent = 'No morphology or electrophysiology data available for specimen ' + specId;
+    tracePlaceholder.style.display = 'block';
+    traceInfo.style.display = 'none';
+  }
+}
+
+// Hover handlers — show ephys trace on hover with debounce
+function onCellHover(data) {
+  const pt = data.points[0];
+  if (!pt.customdata || !pt.customdata[0]) return;
+  // Debounce to avoid rapid SVG fetching
+  clearTimeout(hoverDebounceTimer);
+  const cd = pt.customdata;
+  hoverDebounceTimer = setTimeout(() => {
+    // Only update if this is a different cell
+    if (!currentTraceCustomdata || cd[0] !== currentTraceCustomdata[0]) {
+      showTrace(cd);
+    }
+  }, HOVER_DEBOUNCE_MS);
+}
+
+document.getElementById('exprPlot').on('plotly_hover', function(data) {
+  const pt = data.points[0];
+  if (pt.customdata) {
+    highlightCell(pt.customdata[0], 'expr');
+    onCellHover(data);
+  }
+});
+
+document.getElementById('ephysPlot').on('plotly_hover', function(data) {
+  const pt = data.points[0];
+  if (pt.customdata) {
+    highlightCell(pt.customdata[0], 'ephys');
+    onCellHover(data);
+  }
+});
+
+// ── View switching ────────────────────────────────────────────────
+function updateColoring() {
+  const mode = document.getElementById('colorBy').value;
+
+  // Update reference trace (index 0 in exprPlot)
+  if (mode === 'subclass') {
+    Plotly.restyle('exprPlot', {
+      'marker.color': [refSubclassColors],
+      'marker.opacity': 0.15, 'marker.size': 2,
+      'name': 'snRNA-seq (' + nRefLabel + ')',
+    }, [0]);
+  } else if (mode === 'supertype') {
+    Plotly.restyle('exprPlot', {
+      'marker.color': [refSupertypeColors],
+      'marker.opacity': 0.15, 'marker.size': 2,
+      'name': 'snRNA-seq (' + nRefLabel + ')',
+    }, [0]);
+  } else {
+    Plotly.restyle('exprPlot', {
+      'marker.color': ['#D0D0D0'],
+      'marker.opacity': 0.1, 'marker.size': 2,
+      'name': 'snRNA-seq (' + nRefLabel + ')',
+    }, [0]);
+  }
+
+  // Update patch-seq traces in expression UMAP (indices 1..N)
+  for (let i = 0; i < exprPsTraces.length; i++) {
+    const meta = exprPsMeta[i];
+    const n = exprPsTraces[i].x.length;
+    const traceIdx = i + 1;
+
+    if (mode === 'subclass') {
+      Plotly.restyle('exprPlot', {
+        'marker.color': [Array(n).fill(meta.color)],
+        'name': meta.subclass + ' (' + n + ')',
+      }, [traceIdx]);
+    } else if (mode === 'supertype') {
+      const colors = meta.supertypes.map(s => supertypeColors[s] || '#333333');
+      Plotly.restyle('exprPlot', {
+        'marker.color': [colors],
+        'name': meta.subclass + ' (' + n + ')',
+      }, [traceIdx]);
+    } else {
+      Plotly.restyle('exprPlot', {
+        'marker.color': [Array(n).fill('#E74C3C')],
+        'name': 'patch-seq (' + n + ')',
+      }, [traceIdx]);
+    }
+  }
+
+  // Update ephys traces
+  for (let i = 0; i < ephysTraces.length; i++) {
+    const meta = ephysMeta[i];
+    const n = ephysTraces[i].x.length;
+
+    if (mode === 'subclass') {
+      Plotly.restyle('ephysPlot', {
+        'marker.color': [Array(n).fill(meta.color)],
+      }, [i]);
+    } else if (mode === 'supertype') {
+      const colors = meta.supertypes.map(s => supertypeColors[s] || '#333333');
+      Plotly.restyle('ephysPlot', {
+        'marker.color': [colors],
+      }, [i]);
+    } else {
+      Plotly.restyle('ephysPlot', {
+        'marker.color': [Array(n).fill('#E74C3C')],
+      }, [i]);
+    }
+  }
+
+  // Recolor currently displayed trace to match new coloring mode
+  recolorCurrentTrace();
+}
+
+function resetViews() {
+  Plotly.relayout('exprPlot', { 'xaxis.autorange': true, 'yaxis.autorange': true });
+  Plotly.relayout('ephysPlot', { 'xaxis.autorange': true, 'yaxis.autorange': true });
+}
+
+// ── Legend sync: clicking legend in expr should toggle both plots ──
+document.getElementById('exprPlot').on('plotly_restyle', function(data) {
+  // When a trace visibility changes in expr, sync to ephys
+  if (!data || !data[0] || !data[0].visible) return;
+  const traceIndices = data[1];
+  if (!traceIndices) return;
+
+  for (const ti of traceIndices) {
+    if (ti === 0) continue; // skip ref trace
+    const psMeta = exprPsMeta[ti - 1];
+    if (!psMeta) continue;
+    // Find matching ephys trace by subclass
+    const ephysIdx = ephysMeta.findIndex(m => m.subclass === psMeta.subclass);
+    if (ephysIdx >= 0) {
+      Plotly.restyle('ephysPlot', { visible: data[0].visible }, [ephysIdx]);
+    }
+  }
+});
+</script>
+{% endraw %}
+</body>
+</html>
