@@ -1,5 +1,6 @@
 # Large data files (download/recreate on demand)
 *.h5ad
+!data/patchseq/exports/*.h5ad
 *.RData
 data/nwb_cache/
 data/morphology/swc/
