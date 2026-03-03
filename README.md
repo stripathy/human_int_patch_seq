@@ -2,6 +2,20 @@
 
 Interactive multi-modal explorer for ~1,139 human cortical GABAergic interneurons profiled with Patch-seq. The viewer links three UMAP projections (gene expression, morphology, electrophysiology) with hover-triggered display of morphology reconstructions and electrophysiology recordings.
 
+A major goal of this repository is to harmonize data across two independent Patch-seq studies (Lee, Dalley et al. and Chartrand et al.) that used different metadata schemas, electrophysiology feature sets, and morphology pipelines. The pipeline pulls together gene expression, electrophysiology recordings, morphology reconstructions, and cell type labels from multiple archives (GitHub, DANDI, Brain Image Library) into a single unified dataset for easy reuse.
+
+## Harmonized Data Exports
+
+**If you want to reuse these data, start here.** The following pre-built files in [`data/patchseq/exports/`](data/patchseq/exports/) contain the harmonized outputs and can be used directly without re-running the pipeline:
+
+| File | Size | Description |
+|------|------|-------------|
+| [`patchseq_all_features.csv`](data/patchseq/exports/patchseq_all_features.csv) | 1.5 MB | **All cells, all features (no expression).** 1,154 cells × 180 columns: cell metadata, cell type labels (scANVI + kNN), 3 UMAP coordinates (expression, ephys, morphology), 83 electrophysiology features, and 49 morphology features. |
+| [`patchseq_leedalley.h5ad`](data/patchseq/exports/patchseq_leedalley.h5ad) | 87 MB | **Lee, Dalley et al. expression + embeddings.** 735 cells × 50,281 genes (sparse), with all metadata and UMAP/PCA embeddings in `.obsm`. |
+| [`patchseq_l1.h5ad`](data/patchseq/exports/patchseq_l1.h5ad) | 44 MB | **Chartrand et al. (L1) expression + embeddings.** 361 cells × 50,281 genes (sparse), with all metadata and UMAP/PCA embeddings in `.obsm`. |
+
+The CSV covers the broadest set of cells (including those without expression data) and is the easiest entry point for most analyses. The h5ad files are split by study to stay within GitHub's file size limits and provide full gene expression matrices for scanpy/AnnData workflows.
+
 ## Source Datasets
 
 ### Patch-seq Data
