@@ -1,13 +1,15 @@
 """
 orientation.py -- Detect and fix inverted morphology orientations.
 
-In the SWC files downloaded from BIL, 12 cells have their y-axis inverted:
-dendrites extend below the soma and the axon extends above, which is the
-opposite of normal cortical neuron orientation (dendrites toward pia = up,
-axon toward white matter = down).
+Some SWC files downloaded from BIL have their y-axis inverted. We apply
+flipping *conservatively*, only to Sst and Sst Chodl cells where the
+dendrite-up / axon-down rule is unambiguous. Lamp5 and Pax6 (Layer 1)
+interneurons are excluded because they normally have ascending axons that
+project toward pia, so the heuristic would incorrectly flag their
+biologically correct orientation.
 
 This module provides:
-  - A hardcoded list of the 12 known inverted specimen IDs
+  - A curated list of inverted specimen IDs (Sst / Sst Chodl only)
   - A detection function that scans an SWC directory for inverted cells
   - A flip function that mirrors y-coordinates around the soma
 """
@@ -17,24 +19,31 @@ from pathlib import Path
 from patchseq_builder.morphology.download import parse_swc
 
 
-# ── Known inverted specimen IDs ──────────────────────────────────────────
-# These 12 cells were identified by manual inspection: their dendrites
-# (type 3, basal) are mostly above the soma y and axon (type 3/4) is
-# below, or vice versa, inconsistent with the expected pia-up orientation.
+# ── Known inverted specimen IDs (Sst / Sst Chodl only) ──────────────────
+# Only Sst and Sst Chodl cells are flipped. These cell types have
+# descending axons, so the dendrite-up / axon-down rule is reliable.
+#
+# Lamp5 and Pax6 cells were previously on this list but are excluded
+# because L1 interneurons normally project axons toward pia (ascending),
+# making the heuristic unreliable for those types.
+#
+# Excluded Lamp5/Pax6 specimens (NOT flipped):
+#   548480353  (Pax6, PAX6 CDH12)
+#   653810044  (Lamp5, SST NMBR/ADARB2+)
+#   707795387  (Pax6, PAX6 CDH12)
+#   737549661  (Lamp5, LAMP5 LCP2)
+#   756894558  (Lamp5, SST NMBR/ADARB2+)
+#   811932153  (Lamp5, SST NMBR/ADARB2+)
+#   811953283  (Pax6, PAX6 CDH12)
+#   1009830894 (Lamp5, SST NMBR/ADARB2+)
 
 INVERTED_SPECIMEN_IDS = [
-    1002962250,
-    1009830894,
-    548480353,
-    653810044,
-    707795387,
-    737549661,
-    756894558,
-    811932153,
-    811953283,
-    855783147,
-    941862585,
-    966905488,
+    855783147,   # Sst (Sst_25), LeeDalley, SST CALB1
+    893647190,   # Sst (Sst_25), LeeDalley — visually confirmed inverted
+    941707648,   # Sst (Sst_25), LeeDalley — visually confirmed inverted
+    941862585,   # Sst Chodl (Sst Chodl_2), LeeDalley, SST CALB1
+    966905488,   # Sst (Sst_25), LeeDalley, SST CALB1
+    1002962250,  # Sst (Sst_25), LeeDalley, SST CALB1
 ]
 
 

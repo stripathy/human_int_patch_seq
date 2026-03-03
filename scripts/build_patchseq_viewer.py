@@ -150,7 +150,9 @@ def stage_2_build_h5ad(force: bool = False):
         load_l1_expression,
         merge_expression,
     )
-    from patchseq_builder.expression.umap import compute_expression_umap, compute_ephys_umap
+    from patchseq_builder.expression.umap import (
+        compute_expression_umap, compute_ephys_umap, compute_morphology_umap,
+    )
 
     # 2a. Load expression matrices
     ld_expr, ld_genes, ld_cells = load_leedalley_expression()
@@ -179,19 +181,36 @@ def stage_2_build_h5ad(force: bool = False):
         metadata=meta_indexed,
     )
 
-    # 2d. Compute expression UMAP
+    # 2d. Contamination analysis: identify and score off-target genes
+    print("\nAnalyzing off-target contamination...")
+    from patchseq_builder.expression.contamination import (
+        build_contamination_blacklist,
+        score_contamination,
+    )
+    blacklist = build_contamination_blacklist()
+    contam_scores = score_contamination(adata, blacklist)
+    for col in contam_scores.columns:
+        adata.obs[col] = contam_scores[col].values
+    exclude_genes = set(blacklist.get("combined", []))
+    print(f"  Will exclude {len(exclude_genes)} off-target genes from expression UMAP")
+
+    # 2e. Compute expression UMAP (with contamination genes removed)
     print("\nComputing expression UMAP...")
-    expr_umap = compute_expression_umap(adata)
+    expr_umap = compute_expression_umap(adata, exclude_genes=exclude_genes)
 
     # Rename to X_umap_expr for clarity (expression-only UMAP)
     adata.obsm["X_umap_expr"] = expr_umap.copy()
 
-    # 2e. Compute ephys UMAP
+    # 2f. Compute ephys UMAP
     print("\nComputing ephys UMAP...")
     ephys_df = pd.read_csv(EPHYS_JOINED_CSV)
     compute_ephys_umap(adata, ephys=ephys_df)
 
-    # 2f. Save
+    # 2g. Compute morphology UMAP
+    print("\nComputing morphology UMAP...")
+    compute_morphology_umap(adata)
+
+    # 2g. Save
     print(f"\nSaving h5ad: {PATCHSEQ_H5AD}")
     adata.write(str(PATCHSEQ_H5AD))
     print(f"  Shape: {adata.shape[0]} cells x {adata.shape[1]} genes")
@@ -317,7 +336,13 @@ def stage_4_morphology(force: bool = False):
     # 4b. Render SVGs
     # Naming convention: {sid}_morphology.svg
     print("\nRendering morphology SVGs...")
-    layer_depths = load_layer_depths()
+    cortical_layer_map = {}
+    for _, row in metadata.iterrows():
+        sid = int(row["specimen_id"])
+        cl = row.get("cortical_layer", None)
+        if pd.notna(cl):
+            cortical_layer_map[sid] = cl
+    layer_depths = load_layer_depths(cortical_layer_map=cortical_layer_map)
 
     n_rendered = 0
     n_render_skipped = 0

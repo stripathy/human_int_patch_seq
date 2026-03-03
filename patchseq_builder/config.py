@@ -38,6 +38,7 @@ L1_METADATA_CSV = L1_DATA_DIR / "human_l1_dataset_2023_02_06.csv"
 L1_EPHYS_CSV = L1_DATA_DIR / "aibs_features_E.csv"
 L1_LAYER_DEPTHS_CSV = L1_DATA_DIR / "human_layer_depths_2023_02_06.csv"
 L1_RDATA = L1_DATA_DIR / "ps_human.RData"
+L1_MORPHO_FEATURES_CSV = L1_DATA_DIR / "RawFeatureWide_human+derivatives.csv"
 L1_DONOR_TABLE_XLSX = DATA_DIR / "science.adf0805_data_s1.xlsx"  # Chartrand et al. Data S1
 
 # scANVI label transfer results (4,549 cells → SEA-AD supertypes)
@@ -139,6 +140,11 @@ EPHYS_MIN_CELLS_PER_SUBCLASS = 5  # for feature selection
 # Reference integration
 N_HVGS = 3000
 KNN_K = 15
+
+# Contamination gene removal
+CONTAM_GENE_TOP_N = 200        # max marker genes per off-target class
+CONTAM_GENE_LOGFC_MIN = 1.0    # min log2FC to be considered off-target
+CONTAMINATION_BLACKLIST_CSV = INTERMEDIATES_DIR / "contamination_blacklist.csv"
 
 # Morphology rendering
 AVG_CORTEX_THICKNESS = 3006  # µm

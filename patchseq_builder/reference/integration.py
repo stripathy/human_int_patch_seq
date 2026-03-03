@@ -23,6 +23,7 @@ from patchseq_builder.config import (
     N_HVGS,
     N_PCS,
     N_NEIGHBORS,
+    MIN_DIST,
     RANDOM_STATE,
     SEAAD_H5AD,
     PATCHSEQ_H5AD,
@@ -162,6 +163,7 @@ def _concatenate_datasets(ref, ps):
         "subclass_scANVI", "supertype_scANVI", "specimen_id",
         "subclass_label", "dataset",
         "transcriptomic_type_original", "l1_ttype",
+        "cortical_layer",
     ]:
         if col in ps.obs.columns:
             ps_obs[col] = ps.obs[col].values
@@ -194,7 +196,7 @@ def _concatenate_datasets(ref, ps):
     return combined
 
 
-def _run_harmony_integration(combined):
+def _run_harmony_integration(combined, exclude_genes=None):
     """Run HVG selection, PCA, Harmony, and UMAP on the combined dataset.
 
     HVGs are computed on the reference (snRNA-seq) subset only, then PCA
@@ -206,6 +208,9 @@ def _run_harmony_integration(combined):
     ----------
     combined : sc.AnnData
         Combined AnnData from ``_concatenate_datasets``.
+    exclude_genes : set, optional
+        Gene names to exclude from HVG selection (e.g. off-target
+        contamination genes).
 
     Returns
     -------
@@ -219,11 +224,23 @@ def _run_harmony_integration(combined):
     print("Computing HVGs on GABAergic reference subset...")
     ref_mask = combined.obs["batch"] == "snRNA-seq"
     ref_subset = combined[ref_mask].copy()
-    sc.pp.highly_variable_genes(ref_subset, n_top_genes=N_HVGS, flavor="seurat")
-    hvg_genes = ref_subset.var_names[ref_subset.var["highly_variable"]].tolist()
+
+    # Exclude contamination genes BEFORE HVG selection so the algorithm
+    # uses its full budget on genuinely informative interneuron genes.
+    if exclude_genes:
+        clean_mask = ~ref_subset.var_names.isin(exclude_genes)
+        n_excluded = int((~clean_mask).sum())
+        ref_clean = ref_subset[:, clean_mask].copy()
+        print(f"  Removed {n_excluded} contamination genes before HVG selection "
+              f"({ref_subset.shape[1]} -> {ref_clean.shape[1]} genes)")
+    else:
+        ref_clean = ref_subset
+
+    sc.pp.highly_variable_genes(ref_clean, n_top_genes=N_HVGS, flavor="seurat")
+    hvg_genes = ref_clean.var_names[ref_clean.var["highly_variable"]].tolist()
     combined.var["highly_variable"] = combined.var_names.isin(hvg_genes)
-    print(f"  {len(hvg_genes)} HVGs from GABAergic reference")
-    del ref_subset
+    print(f"  {len(hvg_genes)} HVGs for integration")
+    del ref_subset, ref_clean
     gc.collect()
 
     # -- Scale + PCA ----------------------------------------------------------
@@ -274,13 +291,17 @@ def _run_harmony_integration(combined):
         n_neighbors=N_NEIGHBORS,
         random_state=RANDOM_STATE,
     )
-    sc.tl.umap(combined, random_state=RANDOM_STATE)
+    sc.tl.umap(combined, random_state=RANDOM_STATE, min_dist=MIN_DIST)
     print(f"  UMAP: {combined.obsm['X_umap'].shape}")
 
     return combined
 
 
-def integrate_patchseq_with_reference(patchseq_h5ad_path=None, reference=None) -> sc.AnnData:
+def integrate_patchseq_with_reference(
+    patchseq_h5ad_path=None,
+    reference=None,
+    exclude_genes=None,
+) -> sc.AnnData:
     """Concatenate patch-seq cells with reference, run Harmony integration.
 
     Full pipeline:
@@ -299,6 +320,9 @@ def integrate_patchseq_with_reference(patchseq_h5ad_path=None, reference=None) -
     reference : sc.AnnData, optional
         Pre-loaded GABAergic reference. If None, loads from ``config.SEAAD_H5AD``
         using ``load_gabaergic_reference()``.
+    exclude_genes : set, optional
+        Gene names to exclude from HVG selection. If None, loads the cached
+        contamination blacklist automatically.
 
     Returns
     -------
@@ -337,7 +361,7 @@ def integrate_patchseq_with_reference(patchseq_h5ad_path=None, reference=None) -
     gc.collect()
 
     # Step 6-7: HVG + PCA + Harmony + UMAP
-    combined = _run_harmony_integration(combined)
+    combined = _run_harmony_integration(combined, exclude_genes=exclude_genes)
 
     print(f"Integration complete ({time.time()-t0:.0f}s)")
     return combined

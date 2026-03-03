@@ -30,44 +30,15 @@ _TEMPLATE_DIR = Path(__file__).parent
 # Hover text builder
 # ============================================================================
 
-def _build_hover_text_patchseq(row, source="expression"):
-    """Build rich hover text for a patch-seq cell.
+def _build_hover_text_patchseq(row):
+    """Build hover text for a patch-seq cell (same fields in all UMAP views).
 
     Parameters
     ----------
     row : pd.Series
-        A row from expr_obs or ephys_obs.
-    source : str
-        "expression" or "ephys" -- controls which ephys features to show.
+        A row from expr_obs, ephys_obs, or morph_obs.
     """
-    parts = ["<b>PATCH-SEQ</b>"]
-
-    sid = row.get("specimen_id", "")
-    if pd.notna(sid):
-        parts.append(f"Specimen: {sid}")
-
-    ds = row.get("dataset", "")
-    if pd.notna(ds):
-        parts.append(f"Dataset: {ds}")
-
-    layer = row.get("cortical_layer", "")
-    if pd.notna(layer) and str(layer) not in ("", "nan", "ZZ_Missing"):
-        parts.append(f"Layer: {layer}")
-
-    orig = row.get("subclass_label", "")
-    if pd.notna(orig):
-        parts.append(f"Original subclass: {orig}")
-
-    # Original transcriptomic cluster name
-    ttype = row.get("transcriptomic_type_original", np.nan)
-    if pd.notna(ttype) and str(ttype) != "nan":
-        parts.append(f"T-type: {ttype}")
-
-    l1tt = row.get("l1_ttype", np.nan)
-    if pd.notna(l1tt) and str(l1tt) != "nan":
-        parts.append(f"L1 t-type: {l1tt}")
-
-    parts.append("---")
+    parts = ["<b>Patch-seq</b>"]
 
     disp_sub = row.get("display_subclass", "?")
     if pd.notna(disp_sub) and str(disp_sub) != "nan":
@@ -77,23 +48,22 @@ def _build_hover_text_patchseq(row, source="expression"):
     if pd.notna(disp_sup) and str(disp_sup) != "nan":
         parts.append(f"Supertype: {disp_sup}")
 
-    # Ephys features -- only show in expression UMAP tooltip (not ephys UMAP)
-    if source == "expression":
-        ephys_cols = {
-            "sag": "Sag", "tau": "Tau (ms)",
-            "input_resistance": "Rin (MOhm)",
-            "rheobase_i": "Rheobase (pA)", "fi_fit_slope": "FI slope",
-            "v_baseline": "Vm (mV)",
-        }
-        ephys_parts = []
-        for col, label in ephys_cols.items():
-            val = row.get(col, np.nan)
-            if pd.notna(val):
-                ephys_parts.append(f"{label}: {float(val):.1f}")
+    # Original t-type: use transcriptomic_type_original or l1_ttype
+    ttype = row.get("transcriptomic_type_original", np.nan)
+    if pd.notna(ttype) and str(ttype) != "nan":
+        parts.append(f"Original t-type: {ttype}")
+    else:
+        l1tt = row.get("l1_ttype", np.nan)
+        if pd.notna(l1tt) and str(l1tt) != "nan":
+            parts.append(f"Original t-type: {l1tt}")
 
-        if ephys_parts:
-            parts.append("---")
-            parts.extend(ephys_parts)
+    layer = row.get("cortical_layer", "")
+    if pd.notna(layer) and str(layer) not in ("", "nan", "ZZ_Missing"):
+        parts.append(f"Layer: {layer}")
+
+    sid = row.get("specimen_id", "")
+    if pd.notna(sid):
+        parts.append(f"Specimen: {sid}")
 
     return "<br>".join(parts)
 
@@ -102,26 +72,34 @@ def _build_hover_text_patchseq(row, source="expression"):
 # Plotly trace construction
 # ============================================================================
 
-def _build_plotly_traces(expr_obs, ephys_obs, subclass_colors, supertype_colors):
-    """Build all Plotly trace dicts and metadata for both UMAPs.
+def _build_plotly_traces(expr_obs, ephys_obs, morph_obs, subclass_colors, supertype_colors):
+    """Build all Plotly trace dicts and metadata for all three UMAPs.
 
     Returns
     -------
     dict with keys:
         ref_trace, ref_subclass_colors, ref_supertype_colors,
         expr_ps_traces, expr_ps_meta, ephys_traces, ephys_meta,
-        n_ref, n_ps, n_ephys
+        morph_traces, morph_meta, n_ref, n_ps, n_ephys, n_morph
     """
     is_ref = expr_obs["batch"] == "snRNA-seq"
     is_ps = expr_obs["batch"] == "patch-seq"
 
     # ── Expression UMAP: reference trace ──────────────────────────
     ref_data = expr_obs.loc[is_ref]
+    # Build hover text for reference cells (shown when zoomed in)
+    ref_hover_texts = []
+    for _, row in ref_data.iterrows():
+        sub = row.get("ref_subclass", "?")
+        sup = row.get("ref_supertype", "?")
+        ref_hover_texts.append(f"<b>snRNA-seq</b><br>Subclass: {sub}<br>Supertype: {sup}")
+
     ref_trace = {
         "type": "scattergl",
         "mode": "markers",
         "x": ref_data["umap_1"].tolist(),
         "y": ref_data["umap_2"].tolist(),
+        "text": ref_hover_texts,
         "hoverinfo": "skip",
         "marker": {
             "size": 2,
@@ -216,7 +194,7 @@ def _build_plotly_traces(expr_obs, ephys_obs, subclass_colors, supertype_colors)
         supertype_list = []
 
         for idx, row in subset.iterrows():
-            hover_texts.append(_build_hover_text_patchseq(row, source="ephys"))
+            hover_texts.append(_build_hover_text_patchseq(row))
             sup = row.get("display_supertype", "Unknown")
             supertype_list.append(sup if pd.notna(sup) else "Unknown")
             sid = row.get("specimen_id", "")
@@ -255,9 +233,64 @@ def _build_plotly_traces(expr_obs, ephys_obs, subclass_colors, supertype_colors)
             "supertypes": supertype_list,
         })
 
+    # ── Morphology UMAP traces (one per display_subclass) ───────
+    morph_traces = []
+    morph_meta = []
+
+    if morph_obs is not None and not morph_obs.empty:
+        for sc_name in sorted(morph_obs["display_subclass"].dropna().unique()):
+            mask = morph_obs["display_subclass"] == sc_name
+            subset = morph_obs.loc[mask]
+            color = subclass_colors.get(sc_name, "#333333")
+
+            hover_texts = []
+            custom_data_rows = []
+            supertype_list = []
+
+            for idx, row in subset.iterrows():
+                hover_texts.append(_build_hover_text_patchseq(row))
+                sup = row.get("display_supertype", "Unknown")
+                supertype_list.append(sup if pd.notna(sup) else "Unknown")
+                sid = row.get("specimen_id", "")
+                custom_data_rows.append([
+                    idx,
+                    row.get("trace_svg", ""),
+                    row.get("fi_svg", ""),
+                    str(int(float(sid))) if pd.notna(sid) else "",
+                    str(row.get("display_subclass", sc_name)),
+                    str(row.get("dataset", "")),
+                    str(sup),
+                    row.get("morph_svg", ""),
+                ])
+
+            morph_traces.append({
+                "type": "scattergl",
+                "mode": "markers",
+                "x": subset["umap_1"].tolist(),
+                "y": subset["umap_2"].tolist(),
+                "text": hover_texts,
+                "hoverinfo": "text",
+                "customdata": custom_data_rows,
+                "marker": {
+                    "size": 9,
+                    "color": color,
+                    "opacity": 0.9,
+                    "line": {"width": 0.8, "color": "black"},
+                },
+                "name": f"{sc_name} ({len(subset)})",
+                "legendgroup": sc_name,
+                "showlegend": False,  # shared legend with expression
+            })
+            morph_meta.append({
+                "subclass": sc_name,
+                "color": color,
+                "supertypes": supertype_list,
+            })
+
     n_ref = int(is_ref.sum())
     n_ps = int(is_ps.sum())
     n_ephys = len(ephys_obs)
+    n_morph = len(morph_obs) if morph_obs is not None and not morph_obs.empty else 0
 
     return {
         "ref_trace": ref_trace,
@@ -267,9 +300,12 @@ def _build_plotly_traces(expr_obs, ephys_obs, subclass_colors, supertype_colors)
         "expr_ps_meta": expr_ps_meta,
         "ephys_traces": ephys_traces,
         "ephys_meta": ephys_meta,
+        "morph_traces": morph_traces,
+        "morph_meta": morph_meta,
         "n_ref": n_ref,
         "n_ps": n_ps,
         "n_ephys": n_ephys,
+        "n_morph": n_morph,
     }
 
 
@@ -307,6 +343,7 @@ def build_viewer_html(output_path=None):
     traces = _build_plotly_traces(
         data["expr_obs"],
         data["ephys_obs"],
+        data.get("morph_obs", pd.DataFrame()),
         data["subclass_colors"],
         data["supertype_colors"],
     )
@@ -324,6 +361,7 @@ def build_viewer_html(output_path=None):
     n_ref_fmt = f"{traces['n_ref']:,}"
     n_ps_fmt = f"{traces['n_ps']:,}"
     n_ephys_fmt = f"{traces['n_ephys']:,}"
+    n_morph_fmt = f"{traces['n_morph']:,}"
 
     html = template.render(
         # Data payloads (pre-serialised to JSON for injection into <script>)
@@ -334,12 +372,15 @@ def build_viewer_html(output_path=None):
         expr_ps_meta=json.dumps(traces["expr_ps_meta"]),
         ephys_traces=json.dumps(traces["ephys_traces"]),
         ephys_meta=json.dumps(traces["ephys_meta"]),
+        morph_traces=json.dumps(traces["morph_traces"]),
+        morph_meta=json.dumps(traces["morph_meta"]),
         subclass_colors=json.dumps(data["subclass_colors"]),
         supertype_colors=json.dumps(data["supertype_colors"]),
         # Formatted counts for display in header and JS
         n_ref=n_ref_fmt,
         n_ps=n_ps_fmt,
         n_ephys=n_ephys_fmt,
+        n_morph=n_morph_fmt,
     )
 
     # 4. Save

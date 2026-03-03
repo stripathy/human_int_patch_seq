@@ -11,6 +11,8 @@ with horizontal lines marking cortical layer boundaries when available.
 All constants and paths are imported from config.
 """
 
+from pathlib import Path
+
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -27,15 +29,42 @@ from patchseq_builder.config import (
     LD_MORPHO_FEATURES_CSV,
 )
 from patchseq_builder.morphology.download import parse_swc
+from patchseq_builder.morphology.orientation import INVERTED_SPECIMEN_IDS, flip_swc_y
 
 
-def load_layer_depths() -> dict:
+def _layer_to_norm_depth_midpoint(cortical_layer_val):
+    """Map cortical_layer metadata value to expected normalized depth midpoint.
+
+    Returns the midpoint of the normalized depth range for the given layer,
+    using AVG_LAYER_BOUNDARIES to define layer extents. Returns None for
+    unrecognized values.
+    """
+    layer = str(cortical_layer_val).strip().replace(".0", "")
+    if layer == "1":
+        return AVG_LAYER_BOUNDARIES["L1_L2"] / 2
+    elif layer == "2":
+        return (AVG_LAYER_BOUNDARIES["L1_L2"] + AVG_LAYER_BOUNDARIES["L2_L3"]) / 2
+    elif layer == "3":
+        return (AVG_LAYER_BOUNDARIES["L2_L3"] + AVG_LAYER_BOUNDARIES["L3_L4"]) / 2
+    elif layer in ("4", "5", "5_6", "6"):
+        return (AVG_LAYER_BOUNDARIES["L3_L4"] + 1.0) / 2
+    return None
+
+
+def load_layer_depths(cortical_layer_map=None) -> dict:
     """Load per-specimen cortical layer depth data from measured + estimated sources.
 
     Priority:
       1. Measured layer data from human_layer_depths CSV (~87 cells)
       2. Estimated from soma_aligned_dist_from_pia + population-average
          layer proportions (~128 additional cells)
+
+    Parameters
+    ----------
+    cortical_layer_map : dict, optional
+        Mapping of specimen_id (int) -> cortical_layer value from metadata.
+        When provided, estimated cells use this to derive a cell-specific
+        cortex thickness that places the soma within its annotated layer.
 
     Returns
     -------
@@ -82,20 +111,29 @@ def load_layer_depths() -> dict:
             if pd.isna(pia_dist) or float(pia_dist) <= 0:
                 continue
             pia_dist = float(pia_dist)
-            # Use pia distance as approximate absolute_depth
-            # Assign estimated layer based on population-average proportions
-            norm_depth = pia_dist / AVG_CORTEX_THICKNESS
-            if norm_depth < AVG_LAYER_BOUNDARIES["L1_L2"]:
-                est_layer = "Layer1"
-            elif norm_depth < AVG_LAYER_BOUNDARIES["L2_L3"]:
-                est_layer = "Layer2"
-            elif norm_depth < AVG_LAYER_BOUNDARIES["L3_L4"]:
-                est_layer = "Layer3"
+            # Use cortical_layer metadata to derive cell-specific cortex thickness
+            # so the soma appears in the correct layer in the SVG
+            cortical_layer_val = cortical_layer_map.get(sid) if cortical_layer_map else None
+            midpoint = _layer_to_norm_depth_midpoint(cortical_layer_val) if cortical_layer_val is not None else None
+
+            if midpoint is not None:
+                cell_cortex_thickness = pia_dist / midpoint
+                layer_num = str(cortical_layer_val).strip().replace(".0", "")
+                est_layer = f"Layer{layer_num}"
             else:
-                est_layer = "Layer4+"
+                cell_cortex_thickness = AVG_CORTEX_THICKNESS
+                norm_depth = pia_dist / AVG_CORTEX_THICKNESS
+                if norm_depth < AVG_LAYER_BOUNDARIES["L1_L2"]:
+                    est_layer = "Layer1"
+                elif norm_depth < AVG_LAYER_BOUNDARIES["L2_L3"]:
+                    est_layer = "Layer2"
+                elif norm_depth < AVG_LAYER_BOUNDARIES["L3_L4"]:
+                    est_layer = "Layer3"
+                else:
+                    est_layer = "Layer4+"
             layer_info[sid] = {
                 "absolute_depth": pia_dist,
-                "cortex_thickness": AVG_CORTEX_THICKNESS,
+                "cortex_thickness": cell_cortex_thickness,
                 "layer": est_layer,
                 "estimated": True,
             }
@@ -141,6 +179,15 @@ def render_morphology_svg(swc_path, out_path, layer_info=None, figsize=(4, 6),
     nodes = parse_swc(swc_path)
     if not nodes:
         return None
+
+    # Flip y-axis for known inverted specimens
+    swc_stem = Path(swc_path).stem  # e.g. "548480353_upright"
+    try:
+        specimen_id = int(swc_stem.split("_")[0])
+    except (ValueError, IndexError):
+        specimen_id = None
+    if specimen_id in INVERTED_SPECIMEN_IDS:
+        nodes = flip_swc_y(nodes)
 
     fig, ax = plt.subplots(figsize=figsize)
 

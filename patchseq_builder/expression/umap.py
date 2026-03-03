@@ -1,9 +1,10 @@
 """
-umap.py -- UMAP embedding computation for patch-seq expression and ephys data.
+umap.py -- UMAP embedding computation for patch-seq expression, ephys, and morphology data.
 
-Two independent UMAP projections:
+Three independent UMAP projections:
   - Expression UMAP: HVG selection -> PCA -> neighbors -> UMAP on log-FPKM
   - Ephys UMAP: feature selection -> subclass-median imputation -> PCA -> UMAP
+  - Morphology UMAP: merge LeeDalley + L1 features -> standardize -> PCA -> UMAP
 
 The ephys UMAP uses a careful imputation strategy that fills missing values
 with the median of the cell's subclass, falling back to the global median
@@ -17,6 +18,8 @@ import scanpy as sc
 from patchseq_builder.config import (
     EPHYS_JOINED_CSV,
     EPHYS_MIN_CELLS_PER_SUBCLASS,
+    LD_MORPHO_FEATURES_CSV,
+    L1_MORPHO_FEATURES_CSV,
     MIN_DIST,
     N_NEIGHBORS,
     N_PCS,
@@ -24,19 +27,24 @@ from patchseq_builder.config import (
 )
 
 
-def compute_expression_umap(adata: sc.AnnData) -> np.ndarray:
+def compute_expression_umap(
+    adata: sc.AnnData,
+    exclude_genes: set | None = None,
+) -> np.ndarray:
     """Compute expression UMAP coordinates from log-FPKM data.
 
     Pipeline:
         1. Store original expression in a temporary layer
-        2. Apply log1p transform (on top of log2(FPKM+1) already stored in X)
-        3. Select top 3000 HVGs (Seurat flavor)
-        4. Scale with max_value=10
-        5. PCA (N_PCS components) on HVGs
-        6. Build neighbor graph (N_NEIGHBORS neighbors)
-        7. UMAP
+        2. Optionally exclude off-target contamination genes
+        3. Apply log1p transform (on top of log2(FPKM+1) already stored in X)
+        4. Select top 3000 HVGs (Seurat flavor)
+        5. Scale with max_value=10
+        6. PCA (N_PCS components) on HVGs
+        7. Build neighbor graph (N_NEIGHBORS neighbors)
+        8. UMAP
 
-    After computation, the original expression matrix is restored in adata.X.
+    After computation, the original expression matrix is restored in adata.X
+    (including all genes, even those excluded during UMAP computation).
 
     Parameters
     ----------
@@ -44,6 +52,9 @@ def compute_expression_umap(adata: sc.AnnData) -> np.ndarray:
         AnnData with X in log2(FPKM+1) space. Modified in-place: gains
         .obsm['X_umap'], .obsm['X_pca'], .var['highly_variable'], and
         neighbor graph in .obsp.
+    exclude_genes : set or None
+        Gene names to exclude before HVG selection and PCA. These are
+        typically off-target contamination genes identified from a reference.
 
     Returns
     -------
@@ -52,24 +63,40 @@ def compute_expression_umap(adata: sc.AnnData) -> np.ndarray:
     """
     print("Computing expression UMAP...")
 
-    # Preserve original expression
+    # Preserve original expression and gene set
     adata.layers["fpkm"] = adata.X.copy()
 
-    # Additional log transform for HVG/PCA
-    adata.X = np.log1p(adata.X)
-
-    # HVG selection (Seurat flavor avoids skmisc dependency)
-    sc.pp.highly_variable_genes(adata, n_top_genes=3000, flavor="seurat")
-    n_hvg = adata.var["highly_variable"].sum()
-    print(f"  HVGs: {n_hvg}")
-
-    # Scale and PCA
-    sc.pp.scale(adata, max_value=10)
-    sc.tl.pca(adata, n_comps=N_PCS, use_highly_variable=True)
-
-    # Neighbors and UMAP
-    sc.pp.neighbors(adata, n_neighbors=N_NEIGHBORS, n_pcs=N_PCS, random_state=RANDOM_STATE)
-    sc.tl.umap(adata, random_state=RANDOM_STATE)
+    # Exclude off-target genes if provided
+    if exclude_genes:
+        gene_mask = np.array([g not in exclude_genes for g in adata.var_names])
+        n_excluded = (~gene_mask).sum()
+        print(f"  Excluding {n_excluded} off-target contamination genes")
+        # Work on a subset for HVG/PCA/UMAP, but keep full adata intact
+        adata_clean = adata[:, gene_mask].copy()
+        adata_clean.X = np.log1p(adata_clean.X)
+        sc.pp.highly_variable_genes(adata_clean, n_top_genes=3000, flavor="seurat")
+        n_hvg = adata_clean.var["highly_variable"].sum()
+        print(f"  HVGs: {n_hvg} (from {gene_mask.sum()} clean genes)")
+        sc.pp.scale(adata_clean, max_value=10)
+        sc.tl.pca(adata_clean, n_comps=N_PCS, use_highly_variable=True)
+        sc.pp.neighbors(adata_clean, n_neighbors=N_NEIGHBORS, n_pcs=N_PCS, random_state=RANDOM_STATE)
+        sc.tl.umap(adata_clean, random_state=RANDOM_STATE)
+        # Copy results back to original adata
+        adata.obsm["X_umap"] = adata_clean.obsm["X_umap"]
+        adata.obsm["X_pca"] = adata_clean.obsm["X_pca"]
+        # Store which genes were used
+        adata.uns["umap_excluded_genes"] = sorted(exclude_genes)
+        adata.uns["umap_n_excluded"] = n_excluded
+    else:
+        # Original pipeline: work directly on adata
+        adata.X = np.log1p(adata.X)
+        sc.pp.highly_variable_genes(adata, n_top_genes=3000, flavor="seurat")
+        n_hvg = adata.var["highly_variable"].sum()
+        print(f"  HVGs: {n_hvg}")
+        sc.pp.scale(adata, max_value=10)
+        sc.tl.pca(adata, n_comps=N_PCS, use_highly_variable=True)
+        sc.pp.neighbors(adata, n_neighbors=N_NEIGHBORS, n_pcs=N_PCS, random_state=RANDOM_STATE)
+        sc.tl.umap(adata, random_state=RANDOM_STATE)
 
     # Restore original expression
     adata.X = adata.layers["fpkm"]
@@ -315,5 +342,123 @@ def compute_ephys_umap(
     print(f"  Ephys UMAP computed for {n_with_ephys} cells "
           f"({n_feats} features, subclass-median imputation -> "
           f"{n_pcs} PCs -> 2D UMAP)")
+
+    return full_umap
+
+
+def compute_morphology_umap(adata: sc.AnnData) -> np.ndarray:
+    """Compute morphology UMAP from quantitative morphology features.
+
+    Merges pre-computed morphology feature tables from LeeDalley (140 cells)
+    and L1 (86 cells) on their shared columns, then runs standardize -> PCA
+    -> UMAP. No imputation is needed (both CSVs have zero NaN).
+
+    For the ~11 overlapping specimen_ids, LeeDalley rows are preferred.
+
+    Parameters
+    ----------
+    adata : sc.AnnData
+        AnnData with .obs containing 'specimen_id'. Modified in-place: gains
+        .obsm['X_umap_morph'], .obsm['X_morph_pca'], .obsm['X_morph_scaled'],
+        and .uns morphology metadata.
+
+    Returns
+    -------
+    umap_coords : np.ndarray
+        Shape (n_cells, 2). NaN for cells without morphology features.
+    """
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
+    from umap import UMAP
+
+    print("Computing morphology UMAP...")
+
+    # ── Load both feature tables ─────────────────────────────────────
+    ld_morph = pd.read_csv(str(LD_MORPHO_FEATURES_CSV))
+    l1_morph = pd.read_csv(str(L1_MORPHO_FEATURES_CSV))
+
+    # Drop unnamed index columns
+    ld_morph = ld_morph.loc[:, ~ld_morph.columns.str.startswith("Unnamed")]
+    l1_morph = l1_morph.loc[:, ~l1_morph.columns.str.startswith("Unnamed")]
+
+    print(f"  LeeDalley: {len(ld_morph)} cells, {len(ld_morph.columns)} cols")
+    print(f"  L1: {len(l1_morph)} cells, {len(l1_morph.columns)} cols")
+
+    # ── Shared feature columns ───────────────────────────────────────
+    shared_cols = sorted(set(ld_morph.columns) & set(l1_morph.columns))
+    feat_cols = [c for c in shared_cols if c != "specimen_id"]
+    print(f"  Shared feature columns: {len(feat_cols)}")
+
+    # ── Merge: LeeDalley first (preferred for overlapping specimens) ──
+    ld_sub = ld_morph[["specimen_id"] + feat_cols].copy()
+    l1_sub = l1_morph[["specimen_id"] + feat_cols].copy()
+    merged = pd.concat([ld_sub, l1_sub], ignore_index=True)
+    merged = merged.drop_duplicates(subset="specimen_id", keep="first")
+    merged = merged.set_index("specimen_id")
+    print(f"  Merged: {len(merged)} unique cells")
+
+    # ── Map to adata via specimen_id ─────────────────────────────────
+    if "specimen_id" not in adata.obs.columns:
+        print("  ERROR: specimen_id not in adata.obs, cannot compute morphology UMAP")
+        full_umap = np.full((len(adata), 2), np.nan)
+        adata.obsm["X_umap_morph"] = full_umap
+        return full_umap
+
+    n_feats = len(feat_cols)
+    morph_raw = np.full((len(adata), n_feats), np.nan)
+    for i, sid in enumerate(adata.obs["specimen_id"].values):
+        if pd.notna(sid):
+            try:
+                sid_int = int(float(sid))
+            except (ValueError, TypeError):
+                continue
+            if sid_int in merged.index:
+                morph_raw[i] = merged.loc[sid_int, feat_cols].values
+
+    has_morph = ~np.isnan(morph_raw).all(axis=1)
+    n_with_morph = has_morph.sum()
+    print(f"  Cells with morphology features: {n_with_morph}/{len(adata)}")
+
+    if n_with_morph < 20:
+        print("  Too few cells for morphology UMAP, skipping.")
+        full_umap = np.full((len(adata), 2), np.nan)
+        adata.obsm["X_umap_morph"] = full_umap
+        return full_umap
+
+    # ── Standardize ──────────────────────────────────────────────────
+    morph_valid = morph_raw[has_morph]
+    scaler = StandardScaler()
+    morph_scaled = scaler.fit_transform(morph_valid)
+
+    morph_scaled_full = np.full((len(adata), n_feats), np.nan)
+    morph_scaled_full[has_morph] = morph_scaled
+    adata.obsm["X_morph_scaled"] = morph_scaled_full
+
+    # ── PCA ───────────────────────────────────────────────────────────
+    n_pcs = min(N_PCS, n_feats - 1, n_with_morph - 1)
+    pca = PCA(n_components=n_pcs, random_state=RANDOM_STATE)
+    morph_pca = pca.fit_transform(morph_scaled)
+    var_explained = pca.explained_variance_ratio_.sum()
+    print(f"  PCA: {n_pcs} components, {var_explained * 100:.1f}% variance explained")
+
+    morph_pca_full = np.full((len(adata), n_pcs), np.nan)
+    morph_pca_full[has_morph] = morph_pca
+    adata.obsm["X_morph_pca"] = morph_pca_full
+
+    # ── UMAP ──────────────────────────────────────────────────────────
+    reducer = UMAP(n_neighbors=N_NEIGHBORS, min_dist=MIN_DIST, random_state=RANDOM_STATE)
+    morph_umap = reducer.fit_transform(morph_pca)
+
+    full_umap = np.full((len(adata), 2), np.nan)
+    full_umap[has_morph] = morph_umap
+    adata.obsm["X_umap_morph"] = full_umap
+
+    # ── Store metadata ────────────────────────────────────────────────
+    adata.uns["morph_features"] = feat_cols
+    adata.uns["morph_n_pcs"] = n_pcs
+    adata.uns["morph_pca_var_explained"] = float(var_explained)
+
+    print(f"  Morphology UMAP computed for {n_with_morph} cells "
+          f"({n_feats} features -> {n_pcs} PCs -> 2D UMAP)")
 
     return full_umap

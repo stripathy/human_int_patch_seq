@@ -186,7 +186,22 @@ def load_viewer_data() -> dict:
     ephys_obs["umap_1"] = ephys_umap_valid[:, 0]
     ephys_obs["umap_2"] = ephys_umap_valid[:, 1]
 
-    # -- Carry kNN labels from combined into ephys_obs --
+    # -- Morphology UMAP coordinates (only valid rows) --
+    if "X_umap_morph" in ps.obsm:
+        morph_umap = np.array(ps.obsm["X_umap_morph"])
+        valid_morph = ~np.isnan(morph_umap).any(axis=1)
+        ps_morph = ps[valid_morph].copy()
+        morph_umap_valid = morph_umap[valid_morph]
+
+        morph_obs = ps_morph.obs.copy()
+        morph_obs["umap_1"] = morph_umap_valid[:, 0]
+        morph_obs["umap_2"] = morph_umap_valid[:, 1]
+        print(f"  Morphology UMAP: {len(morph_obs)} cells with valid coordinates")
+    else:
+        morph_obs = pd.DataFrame()
+        print("  WARNING: X_umap_morph not found in h5ad")
+
+    # -- Carry kNN labels from combined into ephys_obs and morph_obs --
     ps_to_combined = {name: f"ps_{name}" for name in ephys_obs.index}
     for col in ["knn_subclass", "knn_subclass_conf", "knn_supertype", "knn_supertype_conf"]:
         if col in combined.obs.columns:
@@ -198,6 +213,19 @@ def load_viewer_data() -> dict:
                 else:
                     vals.append(np.nan)
             ephys_obs[col] = vals
+
+    if not morph_obs.empty:
+        ps_to_combined_morph = {name: f"ps_{name}" for name in morph_obs.index}
+        for col in ["knn_subclass", "knn_subclass_conf", "knn_supertype", "knn_supertype_conf"]:
+            if col in combined.obs.columns:
+                vals = []
+                for name in morph_obs.index:
+                    cname = ps_to_combined_morph[name]
+                    if cname in combined.obs.index:
+                        vals.append(combined.obs.loc[cname, col])
+                    else:
+                        vals.append(np.nan)
+                morph_obs[col] = vals
 
     # -- Carry transcriptomic type columns from patchseq -> expression obs --
     for col in [
@@ -213,23 +241,26 @@ def load_viewer_data() -> dict:
                 if cname in expr_obs.index:
                     expr_obs.loc[cname, col] = ps_vals[ps_name]
 
-    # -- Carry scANVI labels to ephys_obs --
-    for col in [
-        "subclass_scANVI", "supertype_scANVI",
-        "subclass_conf_scANVI", "supertype_conf_scANVI",
-    ]:
-        if col in ps.obs.columns and col not in ephys_obs.columns:
-            vals = []
-            for name in ephys_obs.index:
-                if name in ps.obs.index:
-                    vals.append(ps.obs.at[name, col])
-                else:
-                    vals.append(np.nan)
-            ephys_obs[col] = vals
+    # -- Carry scANVI labels to ephys_obs and morph_obs --
+    for target_obs in [ephys_obs] + ([morph_obs] if not morph_obs.empty else []):
+        for col in [
+            "subclass_scANVI", "supertype_scANVI",
+            "subclass_conf_scANVI", "supertype_conf_scANVI",
+        ]:
+            if col in ps.obs.columns and col not in target_obs.columns:
+                vals = []
+                for name in target_obs.index:
+                    if name in ps.obs.index:
+                        vals.append(ps.obs.at[name, col])
+                    else:
+                        vals.append(np.nan)
+                target_obs[col] = vals
 
     # -- Build consensus labels (scANVI preferred, kNN fallback) --
     expr_obs = _build_consensus_labels(expr_obs)
     ephys_obs = _build_consensus_labels(ephys_obs)
+    if not morph_obs.empty:
+        morph_obs = _build_consensus_labels(morph_obs)
 
     n_scanvi_expr = expr_obs.loc[
         expr_obs.get("batch", "") == "patch-seq", "subclass_scANVI"
@@ -242,6 +273,8 @@ def load_viewer_data() -> dict:
     trace_map, morphology_map = _load_svg_maps()
     expr_obs = _attach_svg_paths(expr_obs, trace_map, morphology_map)
     ephys_obs = _attach_svg_paths(ephys_obs, trace_map, morphology_map)
+    if not morph_obs.empty:
+        morph_obs = _attach_svg_paths(morph_obs, trace_map, morphology_map)
 
     if "batch" in expr_obs.columns:
         n_with_svg = (expr_obs.loc[expr_obs["batch"] == "patch-seq", "trace_svg"] != "").sum()
@@ -259,6 +292,7 @@ def load_viewer_data() -> dict:
     return {
         "expr_obs": expr_obs,
         "ephys_obs": ephys_obs,
+        "morph_obs": morph_obs,
         "subclass_colors": subclass_colors,
         "supertype_colors": supertype_colors,
         "trace_map": trace_map,

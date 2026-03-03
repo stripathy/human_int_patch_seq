@@ -90,6 +90,7 @@ def harmonize_metadata() -> pd.DataFrame:
         "normalized_depth": np.nan,
         "soma_depth_um": np.nan,
         # Identifiers for downstream linking (scANVI, expression, etc.)
+        "lab": "AIBS",                       # all LeeDalley cells are AIBS
         "patched_cell_container": ld["patched_cell_container"],
         "exp_component_name": np.nan,
         "dataset": DATASET_LEEDALLEY,
@@ -125,6 +126,10 @@ def harmonize_metadata() -> pd.DataFrame:
         "dendrite_type": l1["dendrite_type"].map(normalize_dendrite_type),
         "normalized_depth": l1["normalized_depth"],
         "soma_depth_um": l1["soma_depth_um"],
+        # Lab / collaborator
+        "lab": l1["collaborator"].map(
+            {"Huib": "Mansvelder", "Gabor": "Tamás"}
+        ).fillna("AIBS"),
         # Identifiers for downstream linking
         "patched_cell_container": np.nan,
         "exp_component_name": l1["exp_component_name"],
@@ -155,7 +160,7 @@ def harmonize_metadata() -> pd.DataFrame:
     l1_specific_cols = [
         "l1_ttype", "l1_cluster", "l1_homology_type", "core_l1_type",
         "dendrite_type", "normalized_depth", "soma_depth_um",
-        "exp_component_name",
+        "exp_component_name", "lab",
     ]
     for col in l1_specific_cols:
         if col in l1_ov_idx.columns:

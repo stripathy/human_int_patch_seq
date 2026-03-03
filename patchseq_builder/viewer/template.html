@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Linked UMAP Viewer — Expression + Electrophysiology</title>
+<title>Patch-seq Human GABAergic Cell Viewer</title>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -152,24 +152,126 @@
     text-align: center;
     padding: 20px;
   }
+  /* About modal */
+  .about-btn {
+    padding: 3px 10px; border: 1px solid #ccc;
+    border-radius: 4px; font-size: 11px; cursor: pointer;
+    background: white; color: #555; text-decoration: none;
+  }
+  .about-btn:hover { background: #f0f0f0; }
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4); z-index: 1000;
+    justify-content: center; align-items: center;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: white; border-radius: 8px; padding: 28px 32px;
+    max-width: 640px; width: 90%; max-height: 80vh; overflow-y: auto;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    font-size: 13px; line-height: 1.6; color: #333;
+  }
+  .modal h2 { font-size: 18px; margin-bottom: 12px; color: #222; }
+  .modal h3 { font-size: 14px; margin-top: 16px; margin-bottom: 4px; color: #444; }
+  .modal p { margin-bottom: 8px; }
+  .modal a { color: #2563eb; text-decoration: none; }
+  .modal a:hover { text-decoration: underline; }
+  .modal ul { margin: 4px 0 8px 20px; }
+  .modal li { margin-bottom: 3px; }
+  .modal .close-btn {
+    float: right; background: none; border: none;
+    font-size: 20px; cursor: pointer; color: #999; line-height: 1;
+  }
+  .modal .close-btn:hover { color: #333; }
+  .modal hr { border: none; border-top: 1px solid #e0e0e0; margin: 14px 0; }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <h1>Linked UMAP Viewer</h1>
+  <h1>Patch-seq Human GABAergic Cell Viewer</h1>
   <span class="stats">
-    Expression: {{ n_ref }} snRNA-seq + {{ n_ps }} patch-seq &nbsp;|&nbsp;
-    Ephys: {{ n_ephys }} patch-seq cells
+    Expression: {{ n_ps }} Patch-seq + {{ n_ref }} snRNA-seq &nbsp;|&nbsp;
+    Ephys: {{ n_ephys }} cells &nbsp;|&nbsp;
+    Morphology: {{ n_morph }} cells
   </span>
   <div class="controls">
     <label for="colorBy">Color by:</label>
     <select id="colorBy" onchange="updateColoring()">
       <option value="subclass">Subclass</option>
-      <option value="supertype">Supertype</option>
+      <option value="supertype" selected>Supertype</option>
       <option value="modality">Modality</option>
     </select>
     <button onclick="resetViews()">Reset views</button>
+    <button class="about-btn" onclick="document.getElementById('aboutModal').classList.add('active')">About</button>
+  </div>
+</div>
+
+<!-- About modal -->
+<div id="aboutModal" class="modal-overlay" onclick="if(event.target===this)this.classList.remove('active')">
+  <div class="modal">
+    <button class="close-btn" onclick="document.getElementById('aboutModal').classList.remove('active')">&times;</button>
+    <h2>Patch-seq Human GABAergic Cell Viewer</h2>
+    <p>
+      Interactive explorer for human cortical GABAergic interneurons profiled with Patch-seq
+      (simultaneous electrophysiology, transcriptomics, and morphology). Patch-seq cells were
+      collected from resected neocortical human neurosurgical tissues. The snRNA-seq reference
+      was collected from post-mortem donors.
+    </p>
+
+    <hr>
+    <h3>Source Datasets</h3>
+
+    <p><strong>Lee, Dalley et al. (2023)</strong> &mdash; 779 cells, multi-layer MTG Patch-seq<br>
+      <a href="https://doi.org/10.1126/science.adf6484" target="_blank">doi:10.1126/science.adf6484</a>
+      &nbsp;|&nbsp;
+      <a href="https://github.com/AllenInstitute/human_patchseq_gaba" target="_blank">GitHub</a>
+    </p>
+
+    <p><strong>Chartrand et al. (2023)</strong> &mdash; 419 cells, human L1 interneurons<br>
+      <a href="https://doi.org/10.1126/science.adf0805" target="_blank">doi:10.1126/science.adf0805</a>
+      &nbsp;|&nbsp;
+      <a href="https://github.com/AllenInstitute/patchseq_human_L1" target="_blank">GitHub</a>
+    </p>
+
+    <h3>Reference &amp; Cell Type Labels</h3>
+    <p><strong>SEA-AD (Gabitto et al. 2024)</strong> &mdash; snRNA-seq reference for Harmony integration and scANVI label transfer<br>
+      <a href="https://doi.org/10.1038/s41593-024-01774-5" target="_blank">doi:10.1038/s41593-024-01774-5</a>
+    </p>
+
+    <h3>Electrophysiology Recordings (DANDI)</h3>
+    <ul>
+      <li><a href="https://dandiarchive.org/dandiset/000636" target="_blank">DANDI:000636</a> &mdash; Lee, Dalley / AIBS (691 NWBs)</li>
+      <li><a href="https://dandiarchive.org/dandiset/000630" target="_blank">DANDI:000630</a> &mdash; L1 / AIBS (210 NWBs)</li>
+      <li><a href="https://dandiarchive.org/dandiset/000228" target="_blank">DANDI:000228</a> &mdash; Lee-Bhatt (91 NWBs)</li>
+      <li><a href="https://dandiarchive.org/dandiset/000337" target="_blank">DANDI:000337</a> &mdash; (21 NWBs)</li>
+    </ul>
+    <p>Trace SVGs generated with
+      <a href="https://github.com/smestern/pyAPisolation" target="_blank">pyAPisolation</a>
+      via the
+      <a href="https://github.com/smestern/intraDANDI_explorer" target="_blank">intraDANDI explorer</a>
+      (Sam Mestern).
+    </p>
+
+    <h3>Morphology Reconstructions (Brain Image Library)</h3>
+    <ul>
+      <li><a href="https://download.brainimagelibrary.org/group/20230426/swc/" target="_blank">BIL: group/20230426</a></li>
+      <li><a href="https://download.brainimagelibrary.org/d8/33/d833ba8bd931f23f/" target="_blank">BIL: d833ba8bd931f23f</a></li>
+      <li><a href="https://download.brainimagelibrary.org/ef/b9/efb9b12ba2fab63d/" target="_blank">BIL: efb9b12ba2fab63d</a></li>
+      <li><a href="https://download.brainimagelibrary.org/49/e6/49e6114ba67eda01/" target="_blank">BIL: 49e6114ba67eda01</a></li>
+      <li><a href="https://download.brainimagelibrary.org/85/f4/85f4b93699151f1c/" target="_blank">BIL: 85f4b93699151f1c</a></li>
+      <li><a href="https://download.brainimagelibrary.org/24/1a/241a10cde842c99b/" target="_blank">BIL: 241a10cde842c99b</a></li>
+      <li><a href="https://download.brainimagelibrary.org/69/fe/69fe931fee2b2215/" target="_blank">BIL: 69fe931fee2b2215</a></li>
+    </ul>
+
+    <hr>
+    <p style="font-size:11px; color:#888;">
+      Developed by <a href="https://triplab.org/" target="_blank">Shreejoy Tripathy</a>
+      with the assistance of <a href="https://claude.ai/claude-code" target="_blank">Claude Code</a>.
+      Built with <a href="https://plotly.com/javascript/" target="_blank">Plotly.js</a>.
+      Expression UMAP uses Harmony integration with the SEA-AD GABAergic reference.
+      Cell type labels use scANVI transfer with kNN fallback.
+    </p>
   </div>
 </div>
 
@@ -178,6 +280,11 @@
     <div class="panel-title">Gene Expression UMAP (Harmony)</div>
     <div id="exprPlot" class="plot"></div>
     <div id="exprHighlight" class="highlight-info" style="display:none;"></div>
+  </div>
+  <div class="plot-panel">
+    <div class="panel-title">Morphology UMAP</div>
+    <div id="morphPlot" class="plot"></div>
+    <div id="morphHighlight" class="highlight-info" style="display:none;"></div>
   </div>
   <div class="plot-panel">
     <div class="panel-title">Electrophysiology UMAP</div>
@@ -205,7 +312,7 @@
       <div id="fiEmpty" class="panel-empty-msg">No FI curve</div>
     </div>
     <div id="tracePlaceholder" class="trace-placeholder">
-      Hover over a patch-seq cell in either UMAP to view its electrophysiology recording and morphology
+      Hover over a Patch-seq cell in any UMAP to view its electrophysiology recording and morphology
     </div>
   </div>
 </div>
@@ -219,6 +326,8 @@ const exprPsTraces = {{ expr_ps_traces }};
 const exprPsMeta = {{ expr_ps_meta }};
 const ephysTraces = {{ ephys_traces }};
 const ephysMeta = {{ ephys_meta }};
+const morphTraces = {{ morph_traces }};
+const morphMeta = {{ morph_meta }};
 const subclassColors = {{ subclass_colors }};
 const supertypeColors = {{ supertype_colors }};
 const nRefLabel = "{{ n_ref }}";
@@ -230,9 +339,10 @@ const nRefLabel = "{{ n_ref }}";
 // Build lookup: cellId -> {plotId, traceIdx, pointIdx, x, y}
 const exprCellIndex = {};
 const ephysCellIndex = {};
+const morphCellIndex = {};
 
 // Expression: ref trace is index 0, ps traces start at 1
-// customdata format: [cell_id, trace_svg, fi_svg, specimen_id, subclass, dataset]
+// customdata format: [cell_id, trace_svg, fi_svg, specimen_id, subclass, dataset, supertype, morph_svg]
 const exprAllTraces = [refTrace, ...exprPsTraces];
 for (let ti = 1; ti < exprAllTraces.length; ti++) {
   const t = exprAllTraces[ti];
@@ -252,6 +362,15 @@ for (let ti = 0; ti < ephysTraces.length; ti++) {
   }
 }
 
+for (let ti = 0; ti < morphTraces.length; ti++) {
+  const t = morphTraces[ti];
+  if (!t.customdata) continue;
+  for (let pi = 0; pi < t.customdata.length; pi++) {
+    const cd = t.customdata[pi];
+    morphCellIndex[cd[0]] = {traceIdx: ti, pointIdx: pi, x: t.x[pi], y: t.y[pi], cd: cd};
+  }
+}
+
 // ── Layout ────────────────────────────────────────────────────────
 const exprLayout = {
   xaxis: { title: 'UMAP 1', zeroline: false, showgrid: false },
@@ -260,15 +379,20 @@ const exprLayout = {
   margin: { l: 50, r: 10, t: 30, b: 50 },
   paper_bgcolor: '#fafafa',
   plot_bgcolor: 'white',
-  legend: {
-    font: { size: 10 },
-    itemclick: 'toggle',
-    itemdoubleclick: 'toggleothers',
-    x: 1.02, y: 1, xanchor: 'left',
-  },
+  showlegend: false,
 };
 
 const ephysLayout = {
+  xaxis: { title: 'UMAP 1', zeroline: false, showgrid: false },
+  yaxis: { title: 'UMAP 2', zeroline: false, showgrid: false },
+  hovermode: 'closest',
+  margin: { l: 50, r: 10, t: 30, b: 50 },
+  paper_bgcolor: '#fafafa',
+  plot_bgcolor: 'white',
+  showlegend: false,
+};
+
+const morphLayout = {
   xaxis: { title: 'UMAP 1', zeroline: false, showgrid: false },
   yaxis: { title: 'UMAP 2', zeroline: false, showgrid: false },
   hovermode: 'closest',
@@ -286,6 +410,7 @@ const plotConfig = {
 // ── Render plots ──────────────────────────────────────────────────
 Plotly.newPlot('exprPlot', exprAllTraces, exprLayout, plotConfig);
 Plotly.newPlot('ephysPlot', ephysTraces, ephysLayout, plotConfig);
+Plotly.newPlot('morphPlot', morphTraces, morphLayout, plotConfig);
 
 // ── Cross-highlighting using SVG annotations (renders on top of WebGL) ──
 
@@ -302,12 +427,14 @@ function makeHighlightAnnotation(x, y) {
 function clearHighlights() {
   Plotly.relayout('exprPlot', { annotations: [] });
   Plotly.relayout('ephysPlot', { annotations: [] });
+  Plotly.relayout('morphPlot', { annotations: [] });
   document.getElementById('exprHighlight').style.display = 'none';
   document.getElementById('ephysHighlight').style.display = 'none';
+  document.getElementById('morphHighlight').style.display = 'none';
 }
 
 function highlightCell(cellId, source) {
-  // Highlight in the OTHER plot
+  // Highlight in the OTHER plots (not the source)
   if (source !== 'expr' && exprCellIndex[cellId]) {
     const info = exprCellIndex[cellId];
     Plotly.relayout('exprPlot', {
@@ -331,11 +458,74 @@ function highlightCell(cellId, source) {
     Plotly.relayout('ephysPlot', { annotations: [] });
     document.getElementById('ephysHighlight').style.display = 'none';
   }
+
+  if (source !== 'morph' && morphCellIndex[cellId]) {
+    const info = morphCellIndex[cellId];
+    Plotly.relayout('morphPlot', {
+      annotations: [makeHighlightAnnotation(info.x, info.y)],
+    });
+    document.getElementById('morphHighlight').textContent = '\u2190 linked';
+    document.getElementById('morphHighlight').style.display = 'block';
+  } else {
+    Plotly.relayout('morphPlot', { annotations: [] });
+    document.getElementById('morphHighlight').style.display = 'none';
+  }
 }
 
 // Unhover — clear cross-highlight rings but keep trace panel showing last hovered cell
 document.getElementById('exprPlot').on('plotly_unhover', clearHighlights);
 document.getElementById('ephysPlot').on('plotly_unhover', clearHighlights);
+document.getElementById('morphPlot').on('plotly_unhover', clearHighlights);
+
+// ── Zoom-responsive reference points ────────────────────────────────
+// Compute full data extent for the reference trace (avoid spread on large arrays)
+{
+  const refXs = refTrace.x;
+  const refYs = refTrace.y;
+  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+  for (let i = 0; i < refXs.length; i++) {
+    if (refXs[i] < xMin) xMin = refXs[i];
+    if (refXs[i] > xMax) xMax = refXs[i];
+    if (refYs[i] < yMin) yMin = refYs[i];
+    if (refYs[i] > yMax) yMax = refYs[i];
+  }
+  const fullXRange = xMax - xMin;
+  const fullYRange = yMax - yMin;
+  let lastRefZoomLevel = 'full';
+
+  document.getElementById('exprPlot').on('plotly_relayout', function(eventData) {
+    const layout = document.getElementById('exprPlot')._fullLayout;
+    const xRange = layout.xaxis.range;
+    const yRange = layout.yaxis.range;
+    const visibleX = Math.abs(xRange[1] - xRange[0]);
+    const visibleY = Math.abs(yRange[1] - yRange[0]);
+
+    const zoom = Math.max(fullXRange / visibleX, fullYRange / visibleY);
+
+    let level;
+    if (zoom < 1.5) level = 'full';
+    else if (zoom < 3) level = 'medium';
+    else if (zoom < 6) level = 'close';
+    else level = 'deep';
+
+    if (level === lastRefZoomLevel) return;
+    lastRefZoomLevel = level;
+
+    const settings = {
+      full:   { size: 2, opacity: 0.15, hoverinfo: 'skip' },
+      medium: { size: 3, opacity: 0.25, hoverinfo: 'skip' },
+      close:  { size: 5, opacity: 0.4,  hoverinfo: 'text' },
+      deep:   { size: 8, opacity: 0.6,  hoverinfo: 'text' },
+    };
+    const s = settings[level];
+
+    Plotly.restyle('exprPlot', {
+      'marker.size': s.size,
+      'marker.opacity': s.opacity,
+      'hoverinfo': s.hoverinfo,
+    }, [0]);
+  });
+}
 
 // ── Trace panel — hover-triggered with inline SVG + color matching ──
 
@@ -556,8 +746,9 @@ async function showTrace(customdata) {
   const hasAny = traceSvgUrl || fiSvgUrl || morphSvgUrl;
   if (hasAny) {
     tracePlaceholder.style.display = 'none';
+    const supertype = customdata[6] || '';
     const parts = ['<b>Specimen ' + specId + '</b>'];
-    parts.push('<span style="color:' + color + '; font-weight:700;">&#9679;</span> ' + subclass);
+    parts.push('<span style="color:' + color + '; font-weight:700;">&#9679;</span> ' + supertype);
     parts.push('Dataset: ' + dataset);
     const modalities = [];
     if (morphSvgUrl) modalities.push('morphology');
@@ -599,6 +790,14 @@ document.getElementById('ephysPlot').on('plotly_hover', function(data) {
   const pt = data.points[0];
   if (pt.customdata) {
     highlightCell(pt.customdata[0], 'ephys');
+    onCellHover(data);
+  }
+});
+
+document.getElementById('morphPlot').on('plotly_hover', function(data) {
+  const pt = data.points[0];
+  if (pt.customdata) {
+    highlightCell(pt.customdata[0], 'morph');
     onCellHover(data);
   }
 });
@@ -674,6 +873,27 @@ function updateColoring() {
     }
   }
 
+  // Update morph traces
+  for (let i = 0; i < morphTraces.length; i++) {
+    const meta = morphMeta[i];
+    const n = morphTraces[i].x.length;
+
+    if (mode === 'subclass') {
+      Plotly.restyle('morphPlot', {
+        'marker.color': [Array(n).fill(meta.color)],
+      }, [i]);
+    } else if (mode === 'supertype') {
+      const colors = meta.supertypes.map(s => supertypeColors[s] || '#333333');
+      Plotly.restyle('morphPlot', {
+        'marker.color': [colors],
+      }, [i]);
+    } else {
+      Plotly.restyle('morphPlot', {
+        'marker.color': [Array(n).fill('#E74C3C')],
+      }, [i]);
+    }
+  }
+
   // Recolor currently displayed trace to match new coloring mode
   recolorCurrentTrace();
 }
@@ -681,11 +901,12 @@ function updateColoring() {
 function resetViews() {
   Plotly.relayout('exprPlot', { 'xaxis.autorange': true, 'yaxis.autorange': true });
   Plotly.relayout('ephysPlot', { 'xaxis.autorange': true, 'yaxis.autorange': true });
+  Plotly.relayout('morphPlot', { 'xaxis.autorange': true, 'yaxis.autorange': true });
 }
 
-// ── Legend sync: clicking legend in expr should toggle both plots ──
+// ── Legend sync: clicking legend in expr should toggle all plots ──
 document.getElementById('exprPlot').on('plotly_restyle', function(data) {
-  // When a trace visibility changes in expr, sync to ephys
+  // When a trace visibility changes in expr, sync to ephys and morph
   if (!data || !data[0] || !data[0].visible) return;
   const traceIndices = data[1];
   if (!traceIndices) return;
@@ -699,8 +920,17 @@ document.getElementById('exprPlot').on('plotly_restyle', function(data) {
     if (ephysIdx >= 0) {
       Plotly.restyle('ephysPlot', { visible: data[0].visible }, [ephysIdx]);
     }
+    // Find matching morph trace by subclass
+    const morphIdx = morphMeta.findIndex(m => m.subclass === psMeta.subclass);
+    if (morphIdx >= 0) {
+      Plotly.restyle('morphPlot', { visible: data[0].visible }, [morphIdx]);
+    }
   }
 });
+
+// Apply initial coloring from dropdown (default: supertype)
+// Must be after all variable declarations to avoid temporal dead zone errors.
+updateColoring();
 </script>
 {% endraw %}
 </body>
